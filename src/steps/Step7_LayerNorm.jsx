@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
   MatrixViz, InsightBox, Formula, SectionLabel,
 } from '../components/MatrixViz.jsx';
@@ -61,59 +61,84 @@ function Chip({ children, color = '#6366F1' }) {
   );
 }
 
+function ShapeEq({ a, op = '@', b, c, color }) {
+  return (
+    <div style={{
+      fontFamily: 'Space Mono, monospace', fontSize: '12px',
+      background: '#0B0D17', border: `1px solid ${color}44`,
+      borderRadius: '8px', padding: '10px 14px',
+      display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+    }}>
+      <span style={{ color: '#94A3B8' }}>{a}</span>
+      <span style={{ color: '#475569' }}>{op}</span>
+      <span style={{ color: '#94A3B8' }}>{b}</span>
+      <span style={{ color: '#475569' }}>=</span>
+      <span style={{ color, fontWeight: '700' }}>{c}</span>
+    </div>
+  );
+}
+
 export default function Step7_LayerNorm({ result }) {
   if (!result) return null;
   const { tokens, X1, X2, attn, ffn, ln1, ln2 } = result;
-  const seqLen  = tokens.length;
-  const names   = tokens.map(t => t.word);
+  const seqLen = tokens.length;
+  const names  = tokens.map(t => t.word);
 
-  const [view, setView]             = useState('after_attn');
-  const [showNormMath, setShowNormMath] = useState(false);
+  const [view, setView]                     = useState('after_attn');
+  const [showNormMath, setShowNormMath]     = useState(false);
+  const [showW1Math, setShowW1Math]         = useState(false);
+  const [showResMath, setShowResMath]       = useState(false);
 
-  const views = [
-    { id: 'after_attn', label: 'After Attention', color: '#6366F1' },
-    { id: 'after_ffn',  label: 'After FFN',       color: '#EC4899' },
-  ];
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const col8  = Array.from({ length: CFG.EMBED_DIM }, (_, i) => `f${i}`);
+  const col16 = Array.from({ length: CFG.FFN_DIM },   (_, i) => `h${i}`);
 
-  const cur = view === 'after_attn'
-    ? { before: X1, residual: attn.output, added: ln1.added, normed: ln1.normed, label: 'Attention', color: '#6366F1' }
-    : { before: X2, residual: ffn.output,  added: ln2.added, normed: ln2.normed, label: 'FFN',       color: '#EC4899' };
+  // Layer-norm math for the currently visible normed matrix
+  const normInput = view === 'after_attn' ? ln1.added  : ln2.added;
+  const normedOut = view === 'after_attn' ? ln1.normed : ln2.normed;
 
-  // Stats table
-  const rowStats = cur.added.map((row, i) => {
+  const normMath = useMemo(() => {
+    const row  = normInput[0];
+    const n    = row.length;
+    const mean = row.reduce((a, b) => a + b, 0) / n;
+    const diffs = row.map(x => x - mean);
+    const sq    = diffs.map(d => d * d);
+    const variance = sq.reduce((a, b) => a + b, 0) / n;
+    const std  = Math.sqrt(variance + 1e-5);
+    const norm = row.map(x => (x - mean) / std);
+    return {
+      row:      row.map(x => r(x, 4)),
+      mean:     r(mean, 4),
+      diffs:    diffs.map(x => r(x, 4)),
+      sq:       sq.map(x => r(x, 5)),
+      variance: r(variance, 5),
+      std:      r(std, 4),
+      norm:     norm.map(x => r(x, 4)),
+      n,
+    };
+  }, [normInput]);
+
+  // W1 dot product drill-down: h1_pre[0][0] = X2[0] · W1[:,0] + b1[0]
+  const w1Math = useMemo(() => {
+    const x   = X2[0];          // first token input (length 8)
+    const col = ffn.W1.map(row => row[0]);  // first column of W1 (length 8)
+    const b   = ffn.b1[0];
+    const terms = x.map((xi, i) => ({ xi: r(xi, 4), wi: r(col[i], 4), prod: r(xi * col[i], 4) }));
+    const dotSum = r(terms.reduce((s, t) => s + t.prod, 0), 4);
+    const result = r(dotSum + b, 4);
+    return { terms, dotSum, b: r(b, 4), result };
+  }, [X2, ffn]);
+
+  // Row stats for stats table
+  const rowStats = normInput.map((row, i) => {
     const mean = row.reduce((a, b) => a + b, 0) / row.length;
     const variance = row.reduce((a, b) => a + (b - mean) ** 2, 0) / row.length;
     const std = Math.sqrt(variance);
-    const nr = cur.normed[i];
+    const nr = normedOut[i];
     const nm = nr.reduce((a, b) => a + b, 0) / nr.length;
     const ns = Math.sqrt(nr.reduce((a, b) => a + (b - nm) ** 2, 0) / nr.length);
-    return { token: names[i], mean: r(mean, 3), std: r(std, 3), normMean: r(nm, 3), normStd: r(ns, 3) };
+    return { token: names[i], mean: r(mean, 3), std: r(std, 3), nm: r(nm, 3), ns: r(ns, 3) };
   });
-
-  // Full layer-norm drill-down for token 0
-  const normMath = useMemo(() => {
-    const row = cur.added[0];
-    const n   = row.length;
-    const mean = row.reduce((a, b) => a + b, 0) / n;
-    const diffs = row.map(x => x - mean);
-    const squaredDiffs = diffs.map(d => d * d);
-    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / n;
-    const eps = 1e-5;
-    const std = Math.sqrt(variance + eps);
-    const normalized = row.map(x => (x - mean) / std);
-    return {
-      row:          row.map(x => r(x, 4)),
-      mean:         r(mean, 4),
-      diffs:        diffs.map(x => r(x, 4)),
-      squaredDiffs: squaredDiffs.map(x => r(x, 5)),
-      variance:     r(variance, 5),
-      std:          r(std, 4),
-      normalized:   normalized.map(x => r(x, 4)),
-      n,
-    };
-  }, [cur]);
-
-  const col8 = Array.from({ length: CFG.EMBED_DIM }, (_, i) => `f${i}`);
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
@@ -127,364 +152,611 @@ export default function Step7_LayerNorm({ result }) {
             color: '#EF4444', fontWeight: '700', letterSpacing: '1px',
           }}>STEP 7 OF 8</span>
           <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#E2E8F0', margin: 0 }}>
-            Residual + Layer Norm — Keeping Numbers Healthy
+            Residual + Layer Norm — Full Transformer Block
           </h2>
         </div>
         <p style={{ color: '#64748B', fontSize: '13px', margin: 0, lineHeight: '1.7' }}>
-          After big computations (Attention, FFN), numbers can explode to millions or collapse
-          toward zero. These two operations — <strong style={{ color: '#6366F1' }}>residual connection</strong> and{' '}
-          <strong style={{ color: '#10B981' }}>layer normalization</strong> — reset everything to a
-          stable range so learning can continue. This happens <strong style={{ color: '#C4B5FD' }}>twice</strong> per transformer block.
+          This step ties everything together. We trace the <strong style={{ color: '#6366F1' }}>attention path</strong> and
+          the <strong style={{ color: '#EC4899' }}>FFN path</strong> (W1, b1, W2, b2) all the way to the final
+          normalized output — showing exactly where every number comes from.
         </p>
       </div>
 
-      {/* ── THE PROBLEM ── */}
+      {/* ── FULL PIPELINE DIAGRAM ── */}
       <div className="viz-card">
-        <SectionLabel>Why Do We Need This? — The Problem With Deep Networks</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <Box color="#EF4444" icon="💥" title="Exploding activations">
-            Imagine multiplying any number by 1.1 over and over — after 100 layers,
-            a value of 1 becomes <strong style={{ color: '#FCA5A5' }}>1.1¹⁰⁰ ≈ 13,780</strong>.
-            Attention scores become enormous, gradients overflow, and training crashes.
-          </Box>
-          <Box color="#6366F1" icon="🫥" title="Vanishing gradients">
-            The opposite: multiply by 0.9 each layer. After 100 layers,
-            a gradient of 1 becomes <strong style={{ color: '#A5B4FC' }}>0.9¹⁰⁰ ≈ 0.000027</strong>.
-            The signal to learn disappears before it reaches early layers.
-          </Box>
-          <Box color="#10B981" icon="✅" title="Solution: residual + layer norm">
-            <strong style={{ color: '#6EE7B7' }}>Residual</strong> gives gradients a direct highway
-            backwards — they don't have to pass through every operation.
-            <strong style={{ color: '#6EE7B7' }}> Layer Norm</strong> rescales each token vector
-            to mean=0, std=1 so values never drift into dangerous ranges.
-          </Box>
-        </div>
-      </div>
-
-      {/* ── TWO CONCEPTS OVERVIEW ── */}
-      <div className="viz-card">
-        <SectionLabel>The Two Operations — Overview</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-          <div style={{
-            background: '#6366F10D', border: '1px solid #6366F133',
-            borderLeft: '3px solid #6366F1', borderRadius: '8px', padding: '16px',
-          }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#6366F1', fontFamily: 'Space Mono, monospace', letterSpacing: '1px', marginBottom: '10px' }}>
-              PART A — RESIDUAL CONNECTION
-            </div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: '#E2E8F0', marginBottom: '8px' }}>
-              "Keep the original, add the new"
-            </div>
-            <div style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.8' }}>
-              Before normalizing, we add the token vector from <em>before the sublayer</em> back
-              into the result. Like revising an essay while keeping the original draft clipped on.
-              The network only has to learn <em>what changed</em>, not relearn everything.
-            </div>
-            <div style={{ marginTop: '12px', padding: '10px 12px', background: '#0B0D17', borderRadius: '6px', fontFamily: 'Space Mono, monospace', fontSize: '12px', lineHeight: '2' }}>
-              <div><span style={{ color: '#64748B' }}>X_before</span>  <span style={{ color: '#6366F1' }}>+ sublayer(X_before)</span></div>
-              <div><span style={{ color: '#F59E0B' }}>= X_combined</span></div>
+        <SectionLabel>The Full Transformer Block — Where We Are</SectionLabel>
+        <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 14px' }}>
+          One transformer block contains <strong style={{ color: '#E2E8F0' }}>two identical "sublayer + residual + norm"
+          patterns</strong>. The first uses attention, the second uses the FFN.
+          Step 7 covers BOTH of them.
+        </p>
+        <div style={{
+          fontFamily: 'Space Mono, monospace', fontSize: '12px',
+          background: '#0B0D17', border: '1px solid #1E2A45',
+          borderRadius: '10px', padding: '20px', lineHeight: '2.6',
+        }}>
+          <div style={{ color: '#06B6D4' }}>X1   ← input (after pos encoding)</div>
+          <div style={{ display: 'flex', gap: '0', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: '16px' }}>
+              <div style={{ color: '#475569' }}>↓ ┌─────────────────────────────┐</div>
+              <div style={{ color: '#6366F1' }}>  │   Multi-Head Attention       │  ← Step 5</div>
+              <div style={{ color: '#475569' }}>  └─────────────────────────────┘</div>
             </div>
           </div>
-          <div style={{
-            background: '#10B9810D', border: '1px solid #10B98133',
-            borderLeft: '3px solid #10B981', borderRadius: '8px', padding: '16px',
-          }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#10B981', fontFamily: 'Space Mono, monospace', letterSpacing: '1px', marginBottom: '10px' }}>
-              PART B — LAYER NORMALIZATION
-            </div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: '#E2E8F0', marginBottom: '8px' }}>
-              "Rescale to mean=0, spread=1"
-            </div>
-            <div style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.8' }}>
-              For each token independently: subtract its own mean, divide by its own standard
-              deviation. Relative ordering is preserved (high is still high) but values now
-              live in a predictable range the next layer can rely on.
-            </div>
-            <div style={{ marginTop: '12px', padding: '10px 12px', background: '#0B0D17', borderRadius: '6px', fontFamily: 'Space Mono, monospace', fontSize: '12px', lineHeight: '2' }}>
-              <div><span style={{ color: '#F59E0B' }}>X_combined</span>  <span style={{ color: '#10B981' }}>→  subtract mean  →  ÷ std</span></div>
-              <div><span style={{ color: '#10B981' }}>= X_normed</span>  <span style={{ color: '#475569' }}>(mean≈0, std≈1)</span></div>
+          <div style={{ color: '#6366F1', paddingLeft: '16px' }}>
+            attn.output  ← the new information attention found
+          </div>
+          <div style={{ color: '#475569', paddingLeft: '16px' }}>
+            ↓ X1 + attn.output  ← <span style={{ color: '#6366F1' }}>residual (keep original + add new)</span>
+          </div>
+          <div style={{ color: '#6366F1', paddingLeft: '16px' }}>
+            ↓ LayerNorm  →  <span style={{ color: '#10B981' }}>X2  ← "After Attention" tab</span>
+          </div>
+          <div style={{ display: 'flex', gap: '0', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: '16px' }}>
+              <div style={{ color: '#475569' }}>↓ ┌────────────────────────────────────────┐</div>
+              <div style={{ color: '#EC4899' }}>  │   FFN:  X2 @ W1 + b1 → ReLU → @ W2 + b2  │  ← Step 6</div>
+              <div style={{ color: '#475569' }}>  └────────────────────────────────────────┘</div>
             </div>
           </div>
+          <div style={{ color: '#EC4899', paddingLeft: '16px' }}>
+            ffn.output  ← each token thinks privately
+          </div>
+          <div style={{ color: '#475569', paddingLeft: '16px' }}>
+            ↓ X2 + ffn.output  ← <span style={{ color: '#EC4899' }}>residual</span>
+          </div>
+          <div style={{ color: '#EC4899', paddingLeft: '16px' }}>
+            ↓ LayerNorm  →  <span style={{ color: '#10B981' }}>X3  ← "After FFN" tab</span>
+          </div>
+          <div style={{ color: '#F97316' }}>X3  → Step 8 (output prediction)</div>
         </div>
       </div>
 
       {/* ── TAB SELECTOR ── */}
       <div>
         <div style={{ fontSize: '12px', color: '#64748B', fontFamily: 'Space Mono, monospace', marginBottom: '10px' }}>
-          THIS HAPPENS TWICE — pick which one to inspect:
+          SELECT WHICH SUBLAYER TO TRACE IN DETAIL:
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {views.map(v => (
-            <button key={v.id} onClick={() => { setView(v.id); setShowNormMath(false); }} style={{
-              padding: '8px 20px', borderRadius: '8px', border: `2px solid ${v.color}`,
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {[
+            { id: 'after_attn', label: 'After Attention (first sublayer)',  color: '#6366F1' },
+            { id: 'after_ffn',  label: 'After FFN (second sublayer)',       color: '#EC4899' },
+          ].map(v => (
+            <button key={v.id} onClick={() => { setView(v.id); setShowNormMath(false); setShowW1Math(false); setShowResMath(false); }} style={{
+              padding: '10px 22px', borderRadius: '8px', border: `2px solid ${v.color}`,
               background: view === v.id ? `${v.color}22` : 'transparent',
               color: view === v.id ? v.color : '#64748B',
               fontFamily: 'Space Mono, monospace', fontSize: '11px',
               fontWeight: view === v.id ? '700' : '400', cursor: 'pointer', transition: 'all 0.15s',
-            }}>
-              {v.label}
-            </button>
+            }}>{v.label}</button>
           ))}
         </div>
       </div>
 
-      {/* ── STEP-BY-STEP ── */}
-      <div className="viz-card">
-        <SectionLabel>Step-by-Step: After {cur.label}</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', marginTop: '8px' }}>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          AFTER ATTENTION VIEW
+      ═══════════════════════════════════════════════════════════════════════ */}
+      {view === 'after_attn' && (
+        <div className="viz-card">
+          <SectionLabel>After Attention — Step by Step</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', marginTop: '8px' }}>
 
-          {/* STEP 1: Residual */}
-          <StepRow n="1" color="#6366F1" title={`Add the residual — X_before + ${cur.label} output`}>
-            <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 14px' }}>
-              The token vector from <em>before</em> the {cur.label} sublayer is added element-by-element
-              to the sublayer's output. Shape stays <Chip>({seqLen}×{CFG.EMBED_DIM})</Chip> throughout.
-              This is a simple element-wise addition — no learned weights involved.
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
-                  X before {cur.label}
-                </div>
-                <MatrixViz matrix={cur.before} rowLabels={names} size="sm" showColorBar />
+            {/* STEP 1: What came from attention */}
+            <StepRow n="1" color="#6366F1" title="What arrived from Multi-Head Attention (Step 5)">
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                Multi-Head Attention produced a new matrix <Chip color="#6366F1">attn.output</Chip> —
+                same shape as the input <Chip>({seqLen}×{CFG.EMBED_DIM})</Chip>.
+                Every token's row is now a <em>context-aware blend</em> of all tokens' value vectors,
+                but it hasn't been added back to the original yet.
+              </p>
+              <div style={{ fontSize: '11px', color: '#6366F1', fontFamily: 'Space Mono, monospace', marginBottom: '6px' }}>
+                attn.output — what Multi-Head Attention produced ({seqLen}×{CFG.EMBED_DIM}):
               </div>
-              <div style={{ paddingTop: '18px', textAlign: 'center' }}>
-                <div style={{ color: '#6366F1', fontSize: '26px', fontWeight: '700' }}>+</div>
-                <div style={{ fontSize: '10px', color: '#475569', fontFamily: 'Space Mono, monospace' }}>element</div>
-                <div style={{ fontSize: '10px', color: '#475569', fontFamily: 'Space Mono, monospace' }}>-wise</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: cur.color, fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
-                  {cur.label} output
-                </div>
-                <MatrixViz matrix={cur.residual} rowLabels={names} size="sm" showColorBar />
-              </div>
-              <div style={{ paddingTop: '18px', color: '#F59E0B', fontSize: '22px' }}>→</div>
-              <div>
-                <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
-                  Combined (before norm)
-                </div>
-                <MatrixViz matrix={cur.added} rowLabels={names} colLabels={col8} size="sm" showColorBar />
-              </div>
-            </div>
-            <div style={{ marginTop: '12px', fontSize: '12px', color: '#475569', lineHeight: '1.7' }}>
-              Each cell: <Chip color="#6366F1">combined[i][j] = before[i][j] + sublayer_out[i][j]</Chip>
-              — nothing more. The token now contains its original information <em>plus</em> what the
-              sublayer learned.
-            </div>
-          </StepRow>
+              <MatrixViz matrix={attn.output} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+            </StepRow>
 
-          {/* STEP 2: Layer Norm */}
-          <StepRow n="2" color="#10B981" title="Layer Normalization — 4 sub-steps applied to each token row">
-            <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
-              Each token's row of {CFG.EMBED_DIM} numbers is normalized <em>independently</em>.
-              Token 1 does not look at token 2's numbers at all — every row gets its own personal rescaling.
-              Here are the 4 sub-steps:
-            </p>
+            {/* STEP 2: Residual */}
+            <StepRow n="2" color="#F59E0B" title="Residual Addition — X1 + attn.output">
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                <strong style={{ color: '#E2E8F0' }}>Why add the original back?</strong>
+                Attention rewrites the token vectors. But rewriting from scratch loses the original
+                information. Adding X1 back means: "keep everything you knew before, then ADD what
+                attention found on top." This is why it's called a <em>residual</em> — it's the
+                leftover/original that we preserve.
+              </p>
+              <Box color="#F59E0B" icon="✏️" title="Essay analogy">
+                You write a first draft (X1). A review committee (Attention) gives you notes (attn.output).
+                Instead of throwing away your draft and rewriting, you keep the draft and
+                <em> add the notes on top</em>. That's exactly what this addition does.
+              </Box>
 
-            {/* Sub-steps overview */}
-            <div style={{
-              fontFamily: 'Space Mono, monospace', fontSize: '12px',
-              background: '#0B0D17', border: '1px solid #10B98133',
-              borderRadius: '8px', padding: '14px', lineHeight: '2.2', marginBottom: '14px',
-            }}>
-              <div><span style={{ color: '#64748B' }}>1.</span> <span style={{ color: '#06B6D4' }}>mean = average of all 8 numbers in this row</span></div>
-              <div><span style={{ color: '#64748B' }}>2.</span> <span style={{ color: '#6366F1' }}>diffs = each number − mean</span>  <span style={{ color: '#475569' }}>(shift so average is 0)</span></div>
-              <div><span style={{ color: '#64748B' }}>3.</span> <span style={{ color: '#F59E0B' }}>std = √( average of diffs² )</span>  <span style={{ color: '#475569' }}>(measure of spread)</span></div>
-              <div><span style={{ color: '#64748B' }}>4.</span> <span style={{ color: '#10B981' }}>output = diffs / std</span>  <span style={{ color: '#475569' }}>(rescale so spread = 1)</span></div>
-            </div>
-
-            {/* Toggle */}
-            <button
-              onClick={() => setShowNormMath(v => !v)}
-              style={{
-                padding: '8px 16px', borderRadius: '6px', marginBottom: '14px',
-                border: '1px solid #10B981', background: showNormMath ? '#10B98122' : 'transparent',
-                color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '11px',
-                fontWeight: '700', cursor: 'pointer',
-              }}
-            >
-              {showNormMath ? '▼' : '▶'} SHOW ALL 4 SUB-STEPS: normalizing token "{names[0]}"
-            </button>
-
-            {showNormMath && (
-              <div style={{
-                background: '#0B0D17', border: '1px solid #10B98133',
-                borderRadius: '8px', padding: '18px', marginBottom: '14px',
-                fontFamily: 'Space Mono, monospace', fontSize: '12px',
+              <button onClick={() => setShowResMath(v => !v)} style={{
+                padding: '8px 16px', borderRadius: '6px', margin: '12px 0',
+                border: '1px solid #F59E0B', background: showResMath ? '#F59E0B22' : 'transparent',
+                color: '#F59E0B', fontFamily: 'Space Mono, monospace', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
               }}>
-                {/* Input */}
-                <div style={{ color: '#64748B', marginBottom: '12px' }}>
-                  Input row (token "{names[0]}", {normMath.n} numbers):
-                </div>
-                <div style={{ color: '#94A3B8', marginBottom: '16px', lineHeight: '1.8' }}>
-                  [{normMath.row.join(',  ')}]
-                </div>
+                {showResMath ? '▼' : '▶'} SHOW: how combined["{names[0]}"][0] is computed
+              </button>
 
-                {/* Sub-step 1: mean */}
-                <div style={{ borderLeft: '2px solid #06B6D4', paddingLeft: '12px', marginBottom: '16px' }}>
-                  <div style={{ color: '#06B6D4', fontWeight: '700', marginBottom: '6px' }}>
-                    Sub-step 1 — Compute mean
+              {showResMath && (
+                <div style={{
+                  background: '#0B0D17', border: '1px solid #F59E0B33', borderRadius: '8px',
+                  padding: '16px', marginBottom: '12px', fontFamily: 'Space Mono, monospace', fontSize: '12px', lineHeight: '2',
+                }}>
+                  <div style={{ color: '#64748B', marginBottom: '8px' }}>
+                    combined["{names[0]}"] = X1["{names[0]}"] + attn.output["{names[0]}"]
+                    &nbsp;← element by element
                   </div>
-                  <div style={{ color: '#475569', fontSize: '11px', marginBottom: '6px' }}>
-                    Add all {normMath.n} values and divide by {normMath.n}:
-                  </div>
-                  <div style={{ color: '#94A3B8' }}>
-                    ({normMath.row.join(' + ')})
-                  </div>
-                  <div style={{ color: '#94A3B8' }}>
-                    ÷ {normMath.n} = <span style={{ color: '#06B6D4', fontWeight: '700' }}>{normMath.mean}</span>
-                  </div>
-                </div>
-
-                {/* Sub-step 2: subtract mean */}
-                <div style={{ borderLeft: '2px solid #6366F1', paddingLeft: '12px', marginBottom: '16px' }}>
-                  <div style={{ color: '#6366F1', fontWeight: '700', marginBottom: '6px' }}>
-                    Sub-step 2 — Subtract mean from each value
-                  </div>
-                  <div style={{ color: '#475569', fontSize: '11px', marginBottom: '6px' }}>
-                    diffs[i] = row[i] − {normMath.mean}:
-                  </div>
-                  {normMath.row.map((v, i) => (
-                    <div key={i} style={{ color: '#94A3B8', lineHeight: '1.8' }}>
-                      {v.toFixed(4)} − {normMath.mean} = <span style={{ color: '#6366F1' }}>{normMath.diffs[i].toFixed(4)}</span>
+                  {X1[0].map((v, j) => (
+                    <div key={j} style={{ color: j % 2 === 0 ? '#E2E8F0' : '#94A3B8' }}>
+                      dim[{j}]: {r(v, 4).toFixed(4)}
+                      &nbsp;+&nbsp;{r(attn.output[0][j], 4).toFixed(4)}
+                      &nbsp;=&nbsp;<span style={{ color: '#F59E0B', fontWeight: '700' }}>{r(X1[0][j] + attn.output[0][j], 4).toFixed(4)}</span>
                     </div>
                   ))}
                 </div>
+              )}
 
-                {/* Sub-step 3: variance and std */}
-                <div style={{ borderLeft: '2px solid #F59E0B', paddingLeft: '12px', marginBottom: '16px' }}>
-                  <div style={{ color: '#F59E0B', fontWeight: '700', marginBottom: '6px' }}>
-                    Sub-step 3 — Compute variance and std
-                  </div>
-                  <div style={{ color: '#475569', fontSize: '11px', marginBottom: '6px' }}>
-                    Square each diff, average them:
-                  </div>
-                  <div style={{ color: '#94A3B8', lineHeight: '1.8' }}>
-                    diffs²: [{normMath.squaredDiffs.map(x => x.toFixed(5)).join(', ')}]
-                  </div>
-                  <div style={{ color: '#94A3B8' }}>
-                    variance = sum ÷ {normMath.n} = <span style={{ color: '#F59E0B' }}>{normMath.variance}</span>
-                  </div>
-                  <div style={{ color: '#94A3B8' }}>
-                    std = √({normMath.variance} + ε) = <span style={{ color: '#F59E0B', fontWeight: '700' }}>{normMath.std}</span>
-                    <span style={{ color: '#475569', fontSize: '10px' }}> (ε=1e-5 prevents ÷0)</span>
-                  </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>X1 (original before attention)</div>
+                  <MatrixViz matrix={X1} rowLabels={names} size="sm" />
                 </div>
-
-                {/* Sub-step 4: divide */}
-                <div style={{ borderLeft: '2px solid #10B981', paddingLeft: '12px' }}>
-                  <div style={{ color: '#10B981', fontWeight: '700', marginBottom: '6px' }}>
-                    Sub-step 4 — Divide diffs by std
-                  </div>
-                  <div style={{ color: '#475569', fontSize: '11px', marginBottom: '6px' }}>
-                    normalized[i] = diffs[i] ÷ {normMath.std}:
-                  </div>
-                  {normMath.diffs.map((d, i) => (
-                    <div key={i} style={{ color: '#94A3B8', lineHeight: '1.8' }}>
-                      {d.toFixed(4)} ÷ {normMath.std} = <span style={{ color: '#10B981', fontWeight: '700' }}>{normMath.normalized[i].toFixed(4)}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: '10px', color: '#475569', fontSize: '11px' }}>
-                    Mean of output: {r(normMath.normalized.reduce((a, b) => a + b, 0) / normMath.n, 4)} ≈ 0  ✓
-                    <br />
-                    Spread of output: ≈ 1  ✓
-                  </div>
+                <div style={{ paddingTop: '18px', textAlign: 'center' }}>
+                  <div style={{ color: '#F59E0B', fontSize: '26px', fontWeight: '700' }}>+</div>
+                  <div style={{ fontSize: '10px', color: '#475569', fontFamily: 'Space Mono, monospace' }}>element-wise</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#6366F1', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>attn.output (new context)</div>
+                  <MatrixViz matrix={attn.output} rowLabels={names} size="sm" />
+                </div>
+                <div style={{ paddingTop: '18px', color: '#F59E0B', fontSize: '22px' }}>→</div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>Combined (before norm)</div>
+                  <MatrixViz matrix={ln1.added} rowLabels={names} colLabels={col8} size="sm" showColorBar />
                 </div>
               </div>
-            )}
+            </StepRow>
 
-            {/* Stats table */}
-            <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #1E2A45', marginBottom: '16px' }}>
-              <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: 'Space Mono, monospace', fontSize: '11px' }}>
-                <thead>
-                  <tr style={{ background: '#0B0D17' }}>
-                    {['Token', 'Mean before', 'Std before', 'Mean after (→ ~0)', 'Std after (→ ~1)'].map(h => (
-                      <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', borderBottom: '1px solid #1E2A45', fontWeight: '700', whiteSpace: 'nowrap' }}>{h}</th>
+            {/* STEP 3: Layer Norm */}
+            <StepRow n="3" color="#10B981" title="Layer Normalization — rescale each token to mean=0, std=1" last>
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                Each token's row of {CFG.EMBED_DIM} numbers is rescaled <em>independently</em>.
+                The 4 sub-steps: compute mean → subtract it → compute std → divide by it.
+                Relative ordering preserved, scale made consistent.
+              </p>
+
+              <button onClick={() => setShowNormMath(v => !v)} style={{
+                padding: '8px 16px', borderRadius: '6px', marginBottom: '12px',
+                border: '1px solid #10B981', background: showNormMath ? '#10B98122' : 'transparent',
+                color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+              }}>
+                {showNormMath ? '▼' : '▶'} SHOW LAYER NORM MATH for token "{names[0]}"
+              </button>
+
+              {showNormMath && (
+                <div style={{
+                  background: '#0B0D17', border: '1px solid #10B98133', borderRadius: '8px',
+                  padding: '18px', marginBottom: '14px', fontFamily: 'Space Mono, monospace', fontSize: '12px',
+                }}>
+                  <div style={{ color: '#64748B', marginBottom: '10px' }}>
+                    Input row (token "{names[0]}", {normMath.n} numbers):
+                  </div>
+                  <div style={{ color: '#94A3B8', marginBottom: '16px' }}>[{normMath.row.join(',  ')}]</div>
+
+                  <div style={{ borderLeft: '2px solid #06B6D4', paddingLeft: '12px', marginBottom: '14px' }}>
+                    <div style={{ color: '#06B6D4', fontWeight: '700', marginBottom: '4px' }}>Sub-step 1 — mean</div>
+                    <div style={{ color: '#94A3B8' }}>
+                      ({normMath.row.join(' + ')}) ÷ {normMath.n} = <span style={{ color: '#06B6D4', fontWeight: '700' }}>{normMath.mean}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ borderLeft: '2px solid #6366F1', paddingLeft: '12px', marginBottom: '14px' }}>
+                    <div style={{ color: '#6366F1', fontWeight: '700', marginBottom: '4px' }}>Sub-step 2 — subtract mean from each value</div>
+                    {normMath.row.map((v, i) => (
+                      <div key={i} style={{ color: i % 2 === 0 ? '#E2E8F0' : '#94A3B8', lineHeight: '1.8' }}>
+                        {v.toFixed(4)} − {normMath.mean} = <span style={{ color: '#6366F1' }}>{normMath.diffs[i].toFixed(4)}</span>
+                      </div>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowStats.map((s, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #131728' }}>
-                      <td style={{ padding: '8px 14px', color: cur.color, fontWeight: '700' }}>"{s.token}"</td>
-                      <td style={{ padding: '8px 14px', color: '#94A3B8' }}>{s.mean}</td>
-                      <td style={{ padding: '8px 14px', color: '#94A3B8' }}>{s.std}</td>
-                      <td style={{ padding: '8px 14px', color: Math.abs(s.normMean) < 0.05 ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
-                        {s.normMean} {Math.abs(s.normMean) < 0.05 ? '✓' : '≈ 0'}
-                      </td>
-                      <td style={{ padding: '8px 14px', color: Math.abs(s.normStd - 1) < 0.15 ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
-                        {s.normStd} {Math.abs(s.normStd - 1) < 0.15 ? '✓' : '≈ 1'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </div>
 
-            {/* Before / After matrices */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
-                  Before norm (combined)
+                  <div style={{ borderLeft: '2px solid #F59E0B', paddingLeft: '12px', marginBottom: '14px' }}>
+                    <div style={{ color: '#F59E0B', fontWeight: '700', marginBottom: '4px' }}>Sub-step 3 — compute std</div>
+                    <div style={{ color: '#94A3B8', lineHeight: '1.8' }}>
+                      diffs²: [{normMath.sq.join(', ')}]
+                    </div>
+                    <div style={{ color: '#94A3B8' }}>variance = sum ÷ {normMath.n} = <span style={{ color: '#F59E0B' }}>{normMath.variance}</span></div>
+                    <div style={{ color: '#94A3B8' }}>std = √({normMath.variance} + 1e-5) = <span style={{ color: '#F59E0B', fontWeight: '700' }}>{normMath.std}</span></div>
+                  </div>
+
+                  <div style={{ borderLeft: '2px solid #10B981', paddingLeft: '12px' }}>
+                    <div style={{ color: '#10B981', fontWeight: '700', marginBottom: '4px' }}>Sub-step 4 — divide each diff by std</div>
+                    {normMath.diffs.map((d, i) => (
+                      <div key={i} style={{ color: i % 2 === 0 ? '#E2E8F0' : '#94A3B8', lineHeight: '1.8' }}>
+                        {d.toFixed(4)} ÷ {normMath.std} = <span style={{ color: '#10B981', fontWeight: '700' }}>{normMath.norm[i].toFixed(4)}</span>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '8px', color: '#475569', fontSize: '11px' }}>
+                      mean of output ≈ {r(normMath.norm.reduce((a, b) => a + b, 0) / normMath.n, 4)} ≈ 0 ✓  &nbsp;&nbsp; spread ≈ 1 ✓
+                    </div>
+                  </div>
                 </div>
-                <MatrixViz matrix={cur.added} rowLabels={names} size="sm" showColorBar />
-              </div>
-              <div style={{ paddingTop: '18px', textAlign: 'center' }}>
-                <div style={{ color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '11px' }}>Layer</div>
-                <div style={{ color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '11px' }}>Norm</div>
-                <div style={{ color: '#10B981', fontSize: '24px' }}>→</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: '#10B981', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
-                  After norm (mean≈0, std≈1)
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>Before norm</div>
+                  <MatrixViz matrix={ln1.added} rowLabels={names} size="sm" showColorBar />
                 </div>
-                <MatrixViz matrix={cur.normed} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+                <div style={{ paddingTop: '18px', textAlign: 'center' }}>
+                  <div style={{ color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '10px' }}>Layer Norm</div>
+                  <div style={{ color: '#10B981', fontSize: '24px' }}>→</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#10B981', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>After norm = X2 (feeds into FFN)</div>
+                  <MatrixViz matrix={ln1.normed} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+                </div>
               </div>
-            </div>
-            <div style={{ marginTop: '10px', padding: '10px 14px', background: '#10B9810D', border: '1px solid #10B98133', borderRadius: '6px', fontSize: '12px', color: '#94A3B8', lineHeight: '1.6' }}>
-              The colour <em>patterns</em> are similar (relative ordering preserved) but the overall
-              scale is now consistent. High values are still high, low still low — just normalised.
-            </div>
-          </StepRow>
-
-          {/* STEP 3: Done */}
-          <StepRow n="3" color="#8B5CF6" title="Result — normalised output passes to the next step" last>
-            <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: 0 }}>
-              The normed matrix has shape <Chip>({seqLen}×{CFG.EMBED_DIM})</Chip> — identical to the
-              input. Every token still carries its contextual information, but in a stable numerical range.
-              This feeds directly into the next sublayer or the output head.
-            </p>
-          </StepRow>
-
+            </StepRow>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          AFTER FFN VIEW
+      ═══════════════════════════════════════════════════════════════════════ */}
+      {view === 'after_ffn' && (
+        <div className="viz-card">
+          <SectionLabel>After FFN — Full Story: W1, b1, ReLU, W2, b2, Residual, LayerNorm</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', marginTop: '8px' }}>
+
+            {/* STEP 1: Input to FFN */}
+            <StepRow n="1" color="#EC4899" title="Starting point — X2 (output of first residual+norm)">
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                X2 is the result of the first residual+norm (the "After Attention" tab).
+                It has shape <Chip>({seqLen}×{CFG.EMBED_DIM})</Chip>.
+                This is the input to the FFN. Every token processes itself privately from here.
+              </p>
+              <div style={{ fontSize: '11px', color: '#EC4899', fontFamily: 'Space Mono, monospace', marginBottom: '6px' }}>
+                X2 — input to FFN ({seqLen}×{CFG.EMBED_DIM}):
+              </div>
+              <MatrixViz matrix={X2} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+            </StepRow>
+
+            {/* STEP 2: W1 and b1 */}
+            <StepRow n="2" color="#06B6D4" title={`W1 + b1 — Expand from ${CFG.EMBED_DIM} to ${CFG.FFN_DIM} dimensions`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
+                {/* What is W1 */}
+                <Box color="#06B6D4" icon="🔬" title={`What is W1? — shape (${CFG.EMBED_DIM}×${CFG.FFN_DIM})`}>
+                  W1 is a learned weight matrix with <strong style={{ color: '#67E8F9' }}>{CFG.EMBED_DIM} rows and {CFG.FFN_DIM} columns</strong>.
+                  <br /><br />
+                  When you multiply a token vector <Chip color="#06B6D4">(1×{CFG.EMBED_DIM})</Chip> by W1 <Chip color="#06B6D4">({CFG.EMBED_DIM}×{CFG.FFN_DIM})</Chip>
+                  you get a new vector <Chip color="#06B6D4">(1×{CFG.FFN_DIM})</Chip>.
+                  <br /><br />
+                  Think of each of the {CFG.FFN_DIM} output dimensions as a different "question" the FFN asks:
+                  "how much does this token's {CFG.EMBED_DIM} features activate concept #0?
+                  concept #1? … concept #15?"
+                  W1 holds the {CFG.EMBED_DIM}×{CFG.FFN_DIM} = {CFG.EMBED_DIM * CFG.FFN_DIM} learned weights for all those questions.
+                </Box>
+
+                {/* What is b1 */}
+                <Box color="#8B5CF6" icon="➕" title={`What is b1? — shape (${CFG.FFN_DIM},)`}>
+                  b1 is a <strong style={{ color: '#C4B5FD' }}>bias vector</strong> with {CFG.FFN_DIM} numbers — one per hidden dimension.
+                  <br /><br />
+                  After the matrix multiply (X2 @ W1), we ADD b1 to every row.
+                  Each bias adjusts the "default activation level" of that hidden dimension before any input is considered.
+                  <br /><br />
+                  Without bias: if all inputs were 0, all outputs would be 0.
+                  With bias: even with zero input, each hidden unit starts at its own learned baseline.
+                </Box>
+
+                {/* The shape equation */}
+                <ShapeEq
+                  a={`X2  (${seqLen}×${CFG.EMBED_DIM})`}
+                  b={`W1  (${CFG.EMBED_DIM}×${CFG.FFN_DIM})`}
+                  c={`h1_pre  (${seqLen}×${CFG.FFN_DIM})  ← then + b1`}
+                  color="#06B6D4"
+                />
+
+                {/* The expansion */}
+                <div style={{
+                  fontFamily: 'Space Mono, monospace', fontSize: '12px',
+                  background: '#0B0D17', border: '1px solid #06B6D433',
+                  borderRadius: '8px', padding: '14px', lineHeight: '2.2',
+                }}>
+                  <div style={{ color: '#64748B' }}>Why expand {CFG.EMBED_DIM} → {CFG.FFN_DIM}?</div>
+                  <div style={{ color: '#94A3B8', marginTop: '6px' }}>
+                    More dimensions = more "thinking room". The FFN can represent richer
+                    intermediate concepts in the high-dimensional space before compressing
+                    back down. This is exactly why FFN_DIM = 2× EMBED_DIM in this model
+                    ({CFG.FFN_DIM} = {CFG.EMBED_DIM * 2}). Real GPT uses 4× ({768}→{3072}).
+                  </div>
+                </div>
+
+                {/* W1 dot product drill-down */}
+                <button onClick={() => setShowW1Math(v => !v)} style={{
+                  padding: '8px 16px', borderRadius: '6px',
+                  border: '1px solid #06B6D4', background: showW1Math ? '#06B6D422' : 'transparent',
+                  color: '#06B6D4', fontFamily: 'Space Mono, monospace', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                }}>
+                  {showW1Math ? '▼' : '▶'} SHOW HOW h1_pre["{names[0]}"][0] is computed from W1 and b1
+                </button>
+
+                {showW1Math && (
+                  <div style={{
+                    background: '#0B0D17', border: '1px solid #06B6D433', borderRadius: '8px',
+                    padding: '18px', fontFamily: 'Space Mono, monospace', fontSize: '12px', lineHeight: '2',
+                  }}>
+                    <div style={{ color: '#64748B', marginBottom: '10px' }}>
+                      h1_pre["{names[0]}"][dim 0] = X2["{names[0]}"] · W1[:,0]  +  b1[0]
+                    </div>
+                    <div style={{ color: '#475569', fontSize: '11px', marginBottom: '8px' }}>
+                      = sum of (each input value × each weight in column 0 of W1), then + bias:
+                    </div>
+
+                    {w1Math.terms.map((t, i) => (
+                      <div key={i} style={{ color: i % 2 === 0 ? '#E2E8F0' : '#94A3B8' }}>
+                        X2[{i}]={t.xi.toFixed(4)}  ×  W1[{i}][0]={t.wi.toFixed(4)}
+                        {'  =  '}<span style={{ color: '#06B6D4' }}>{t.prod.toFixed(4)}</span>
+                      </div>
+                    ))}
+
+                    <div style={{ borderTop: '1px solid #06B6D433', paddingTop: '10px', marginTop: '8px' }}>
+                      <div style={{ color: '#94A3B8' }}>
+                        dot product sum: <span style={{ color: '#06B6D4' }}>{w1Math.dotSum.toFixed(4)}</span>
+                      </div>
+                      <div style={{ color: '#94A3B8' }}>
+                        + b1[0] = <span style={{ color: '#8B5CF6' }}>{w1Math.b.toFixed(4)}</span>
+                      </div>
+                      <div style={{ marginTop: '4px' }}>
+                        <span style={{ color: '#64748B' }}>h1_pre["{names[0]}"][0] = </span>
+                        <span style={{ color: '#06B6D4', fontWeight: '700', fontSize: '14px' }}>{w1Math.result.toFixed(4)}</span>
+                      </div>
+                    </div>
+                    <div style={{ color: '#475569', fontSize: '11px', marginTop: '10px', lineHeight: '1.7' }}>
+                      Repeat this for all {CFG.FFN_DIM} output dimensions → one full row of h1_pre.
+                      Repeat for all {seqLen} tokens → the full h1_pre matrix.
+                    </div>
+                  </div>
+                )}
+
+                {/* W1 matrix */}
+                <div>
+                  <div style={{ fontSize: '11px', color: '#06B6D4', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
+                    W1 — the weight matrix ({CFG.EMBED_DIM}×{CFG.FFN_DIM}):
+                  </div>
+                  <MatrixViz matrix={ffn.W1} colLabels={col16} size="sm" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#8B5CF6', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
+                    b1 — the bias vector ({CFG.FFN_DIM},) — one number per hidden dim:
+                  </div>
+                  <MatrixViz matrix={[ffn.b1]} colLabels={col16} size="sm" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#06B6D4', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
+                    h1_pre = X2 @ W1 + b1 — result before ReLU ({seqLen}×{CFG.FFN_DIM}):
+                  </div>
+                  <MatrixViz matrix={ffn.h1_pre} rowLabels={names} colLabels={col16} size="sm" maxCols={CFG.FFN_DIM} showColorBar />
+                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '6px' }}>
+                    Mix of positive and negative values. Next step kills all the negatives.
+                  </div>
+                </div>
+              </div>
+            </StepRow>
+
+            {/* STEP 3: ReLU */}
+            <StepRow n="3" color="#F59E0B" title="ReLU — kill all negative values">
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                <Chip color="#F59E0B">ReLU(x) = max(0, x)</Chip>
+                <br /><br />
+                The simplest possible filter: if a number is negative → set it to 0. If positive → keep it.
+                Why? A negative hidden value means "this concept does NOT apply here."
+                Setting it to zero tells the next layer to ignore that concept completely.
+                Only the neurons that "fire" (positive) carry information forward.
+              </p>
+              <div style={{
+                fontFamily: 'Space Mono, monospace', fontSize: '12px',
+                background: '#0B0D17', border: '1px solid #F59E0B33',
+                borderRadius: '8px', padding: '14px', lineHeight: '2', marginBottom: '12px',
+              }}>
+                <div style={{ color: '#64748B' }}>Example values from h1_pre["{names[0]}"]:  (showing first 6)</div>
+                {ffn.h1_pre[0].slice(0, 6).map((v, i) => (
+                  <div key={i} style={{ color: '#94A3B8' }}>
+                    dim[{i}]: {r(v, 4).toFixed(4)}
+                    {'  →  ReLU →  '}
+                    <span style={{ color: v >= 0 ? '#10B981' : '#EF4444', fontWeight: '700' }}>
+                      {v >= 0 ? r(v, 4).toFixed(4) : '0.0000'}
+                    </span>
+                    <span style={{ color: '#475569', fontSize: '10px', marginLeft: '8px' }}>
+                      {v >= 0 ? '✓ kept' : '✗ zeroed'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#EC4899', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>Before ReLU (h1_pre)</div>
+                  <MatrixViz matrix={ffn.h1_pre} rowLabels={names} size="sm" maxCols={CFG.FFN_DIM} showColorBar />
+                </div>
+                <div style={{ paddingTop: '18px', textAlign: 'center' }}>
+                  <div style={{ color: '#F59E0B', fontFamily: 'Space Mono, monospace', fontSize: '10px' }}>max(0,x)</div>
+                  <div style={{ color: '#F59E0B', fontSize: '24px' }}>→</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>After ReLU (h1_relu) — negatives are 0</div>
+                  <MatrixViz matrix={ffn.h1_relu} rowLabels={names} colLabels={col16} size="sm" maxCols={CFG.FFN_DIM} showColorBar />
+                </div>
+              </div>
+            </StepRow>
+
+            {/* STEP 4: W2 and b2 */}
+            <StepRow n="4" color="#10B981" title={`W2 + b2 — Shrink back from ${CFG.FFN_DIM} to ${CFG.EMBED_DIM}`}>
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                W2 is shape <Chip color="#10B981">({CFG.FFN_DIM}×{CFG.EMBED_DIM})</Chip> — the reverse of W1.
+                It compresses the {CFG.FFN_DIM} filtered concepts back into the {CFG.EMBED_DIM}-dim space.
+                b2 is a ({CFG.EMBED_DIM},) bias, one per output dimension.
+              </p>
+              <Box color="#10B981" icon="🗜️" title="Why shrink back?">
+                We expanded to {CFG.FFN_DIM} to get more "thinking room", but the rest of the
+                transformer (next layers, attention, output) all expect {CFG.EMBED_DIM}-dim vectors.
+                W2 summarises the expanded thinking back into the standard size.
+                Think of it as: brainstorm freely in a big space, then write a concise summary.
+              </Box>
+              <div style={{ marginTop: '12px' }}>
+                <ShapeEq
+                  a={`h1_relu  (${seqLen}×${CFG.FFN_DIM})`}
+                  b={`W2  (${CFG.FFN_DIM}×${CFG.EMBED_DIM})`}
+                  c={`ffn.output  (${seqLen}×${CFG.EMBED_DIM})  ← then + b2`}
+                  color="#10B981"
+                />
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#10B981', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>
+                    ffn.output — result ({seqLen}×{CFG.EMBED_DIM}):
+                  </div>
+                  <MatrixViz matrix={ffn.output} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+                </div>
+              </div>
+            </StepRow>
+
+            {/* STEP 5: Second Residual */}
+            <StepRow n="5" color="#F59E0B" title="Second Residual — X2 + ffn.output">
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                Same pattern as after attention: keep the original (X2) and ADD the FFN's contribution on top.
+                X2 has the attention-enriched information; ffn.output has the private-thinking
+                contribution. Together they form the most complete representation of each token so far.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>X2 (before FFN)</div>
+                  <MatrixViz matrix={X2} rowLabels={names} size="sm" />
+                </div>
+                <div style={{ paddingTop: '18px', textAlign: 'center' }}>
+                  <div style={{ color: '#F59E0B', fontSize: '26px', fontWeight: '700' }}>+</div>
+                  <div style={{ fontSize: '10px', color: '#475569', fontFamily: 'Space Mono, monospace' }}>element-wise</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#10B981', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>ffn.output (FFN contribution)</div>
+                  <MatrixViz matrix={ffn.output} rowLabels={names} size="sm" />
+                </div>
+                <div style={{ paddingTop: '18px', color: '#F59E0B', fontSize: '22px' }}>→</div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>Combined (before 2nd norm)</div>
+                  <MatrixViz matrix={ln2.added} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+                </div>
+              </div>
+            </StepRow>
+
+            {/* STEP 6: Second Layer Norm */}
+            <StepRow n="6" color="#10B981" title="Second Layer Norm — normalize to mean=0, std=1 → X3" last>
+              <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.7', margin: '0 0 12px' }}>
+                Same 4-sub-step normalization as before. After this, we have X3 — the final
+                hidden state that goes to Step 8 for prediction.
+              </p>
+              <button onClick={() => setShowNormMath(v => !v)} style={{
+                padding: '8px 16px', borderRadius: '6px', marginBottom: '12px',
+                border: '1px solid #10B981', background: showNormMath ? '#10B98122' : 'transparent',
+                color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+              }}>
+                {showNormMath ? '▼' : '▶'} SHOW LAYER NORM MATH for token "{names[0]}"
+              </button>
+
+              {showNormMath && (
+                <div style={{
+                  background: '#0B0D17', border: '1px solid #10B98133', borderRadius: '8px',
+                  padding: '18px', marginBottom: '14px', fontFamily: 'Space Mono, monospace', fontSize: '12px',
+                }}>
+                  <div style={{ color: '#64748B', marginBottom: '10px' }}>
+                    Input: combined["{names[0]}"] = [{normMath.row.join(', ')}]
+                  </div>
+                  <div style={{ color: '#06B6D4' }}>mean = {normMath.mean}</div>
+                  <div style={{ color: '#6366F1' }}>diffs = [{normMath.diffs.join(', ')}]</div>
+                  <div style={{ color: '#F59E0B' }}>std = √({normMath.variance} + 1e-5) = {normMath.std}</div>
+                  <div style={{ color: '#10B981', fontWeight: '700' }}>normalized = [{normMath.norm.join(', ')}]</div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#F59E0B', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>Before norm</div>
+                  <MatrixViz matrix={ln2.added} rowLabels={names} size="sm" showColorBar />
+                </div>
+                <div style={{ paddingTop: '18px', textAlign: 'center' }}>
+                  <div style={{ color: '#10B981', fontFamily: 'Space Mono, monospace', fontSize: '10px' }}>Layer Norm</div>
+                  <div style={{ color: '#10B981', fontSize: '24px' }}>→</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#10B981', fontFamily: 'Space Mono, monospace', marginBottom: '4px' }}>X3 = after norm → goes to Step 8</div>
+                  <MatrixViz matrix={ln2.normed} rowLabels={names} colLabels={col8} size="sm" showColorBar />
+                </div>
+              </div>
+
+              {/* Stats table */}
+              <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #1E2A45', marginTop: '16px' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: 'Space Mono, monospace', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ background: '#0B0D17' }}>
+                      {['Token', 'Mean before', 'Std before', 'Mean after (→ ~0)', 'Std after (→ ~1)'].map(h => (
+                        <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', borderBottom: '1px solid #1E2A45', fontWeight: '700', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowStats.map((s, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #131728' }}>
+                        <td style={{ padding: '8px 14px', color: '#EC4899', fontWeight: '700' }}>"{s.token}"</td>
+                        <td style={{ padding: '8px 14px', color: '#94A3B8' }}>{s.mean}</td>
+                        <td style={{ padding: '8px 14px', color: '#94A3B8' }}>{s.std}</td>
+                        <td style={{ padding: '8px 14px', color: Math.abs(s.nm) < 0.05 ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
+                          {s.nm} {Math.abs(s.nm) < 0.05 ? '✓' : '≈ 0'}
+                        </td>
+                        <td style={{ padding: '8px 14px', color: Math.abs(s.ns - 1) < 0.15 ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
+                          {s.ns} {Math.abs(s.ns - 1) < 0.15 ? '✓' : '≈ 1'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </StepRow>
+
+          </div>
+        </div>
+      )}
 
       {/* ── FORMULA ── */}
       <Formula>
-        {`// Part A — Residual Connection (no learned weights)
-X_combined[i] = X_before[i] + Sublayer(X_before)[i]     ← element-wise for each token i
+        {`// After Attention:
+X_combined = X1 + attn.output            ← residual (element-wise add)
+X2 = LayerNorm(X_combined)               ← normalize each token row
 
-// Part B — Layer Norm (applied independently to each token row)
-mean[i]   = average( X_combined[i] )                     ← single number per token
-variance[i] = average( (X_combined[i][j] - mean[i])^2 )  ← spread
-std[i]    = sqrt( variance[i] + 1e-5 )                   ← +1e-5 prevents divide-by-zero
-X_normed[i][j] = ( X_combined[i][j] - mean[i] ) / std[i] ← rescale each element
+// FFN (applied independently to each token):
+h1_pre  = X2 @ W1 + b1                  W1:(${CFG.EMBED_DIM}×${CFG.FFN_DIM})  b1:(${CFG.FFN_DIM},)  → expand ${CFG.EMBED_DIM}→${CFG.FFN_DIM}
+h1_relu = max(0, h1_pre)                ← ReLU: kill negatives
+ffn_out = h1_relu @ W2 + b2             W2:(${CFG.FFN_DIM}×${CFG.EMBED_DIM})  b2:(${CFG.EMBED_DIM},)  → shrink ${CFG.FFN_DIM}→${CFG.EMBED_DIM}
 
-// Result: mean(X_normed[i]) ≈ 0,  std(X_normed[i]) ≈ 1  for every token i`}
+// After FFN:
+X_combined2 = X2 + ffn_out              ← residual
+X3 = LayerNorm(X_combined2)             ← normalize → goes to Step 8`}
       </Formula>
 
       {/* ── INSIGHT ── */}
-      <InsightBox title="Why These Two Operations Are Inseparable">
-        The <strong style={{ color: '#E2E8F0' }}>residual</strong> solves the vanishing gradient
-        problem: during backpropagation, gradients can flow directly through the addition shortcut
-        without shrinking — this is why transformers can be 96+ layers deep and still train.
+      <InsightBox title="Why All Four Operations (W1, b1, W2, b2) Together?">
+        <strong style={{ color: '#E2E8F0' }}>W1 + b1</strong> is the "brainstorm" step —
+        expand into a larger space and explore richer intermediate concepts.
+        Without bias (b1), zero-input tokens would always produce zero intermediate values,
+        limiting expressiveness.
         <br /><br />
-        The <strong style={{ color: '#E2E8F0' }}>layer norm</strong> solves the scale problem:
-        even with the residual shortcut, the summed values can still be very large or variable.
-        Normalising ensures the next layer always starts from a consistent, well-behaved distribution.
+        <strong style={{ color: '#E2E8F0' }}>ReLU</strong> introduces non-linearity —
+        without it, two matrix multiplies (W1 and W2) would collapse into one, making the FFN no
+        more powerful than a single linear layer.
         <br /><br />
-        Together they appear <strong style={{ color: '#C4B5FD' }}>twice per block</strong> — once
-        after attention, once after FFN — giving the model four "clean slate" moments per layer.
+        <strong style={{ color: '#E2E8F0' }}>W2 + b2</strong> is the "summarise" step —
+        compress the rich intermediate representation back to the model's working size.
+        <br /><br />
+        The two <strong style={{ color: '#E2E8F0' }}>residuals + layer norms</strong> ensure the
+        model can be stacked dozens of times without gradients exploding or vanishing.
       </InsightBox>
 
     </div>
