@@ -154,6 +154,36 @@ const INDEX_TYPES = [
   },
 ];
 
+const STORED_RECORD = `{
+  id: "hr_manual_p4_c2",
+  vector: [0.231, -0.118, 0.904, ...],
+  text: "Unused days may roll over up to 5 days...",
+  metadata: {
+    source: "HR_Manual.pdf",
+    page: 4,
+    section: "Vacation Policy",
+    chunk_id: "4_2"
+  }
+}`;
+
+const STORAGE_FIELDS = [
+  {
+    name: 'Vector',
+    color: '#8B5CF6',
+    desc: 'Used for similarity search. This is the embedding created from the chunk text.',
+  },
+  {
+    name: 'Text',
+    color: '#10B981',
+    desc: 'Returned to the LLM after retrieval. Without stored text, search would find a vector but have nothing useful to send to the model.',
+  },
+  {
+    name: 'Metadata',
+    color: '#F59E0B',
+    desc: 'Used for filters, source citations, and debugging. Usually metadata is stored separately, not embedded directly.',
+  },
+];
+
 export default function RagStep5_VectorStore() {
   const [selectedDb, setSelectedDb] = useState(0);
   const [activeTab, setActiveTab] = useState('dbs'); // dbs | index | ops
@@ -177,6 +207,52 @@ export default function RagStep5_VectorStore() {
           The database also stores the original chunk text and metadata alongside the vector,
           so when retrieval finds a vector, you can return the actual text to the LLM.
         </p>
+      </div>
+
+      {/* Better understanding */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+        <div style={{ background: '#0E1220', border: '1px solid #8B5CF644', borderRadius: '12px', padding: '20px' }}>
+          <div style={{ color: '#8B5CF6', fontWeight: '700', fontSize: '14px', marginBottom: '12px' }}>
+            What one stored chunk record looks like
+          </div>
+          <pre style={{
+            margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'Space Mono, monospace',
+            fontSize: '11px', lineHeight: '1.7', color: '#94A3B8',
+            background: '#131728', border: '1px solid #1E2A45', borderRadius: '8px', padding: '12px',
+          }}>{STORED_RECORD}</pre>
+        </div>
+
+        <div style={{ background: '#0E1220', border: '1px solid #1E2A45', borderRadius: '12px', padding: '20px' }}>
+          <div style={{ color: '#E2E8F0', fontWeight: '700', fontSize: '14px', marginBottom: '12px' }}>
+            Why all three fields matter
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {STORAGE_FIELDS.map((field) => (
+              <div key={field.name} style={{
+                background: '#131728',
+                border: `1px solid ${field.color}33`,
+                borderLeft: `3px solid ${field.color}`,
+                borderRadius: '8px',
+                padding: '12px 14px',
+              }}>
+                <div style={{ color: field.color, fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>{field.name}</div>
+                <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.7' }}>{field.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: '#0A1628', border: '1px solid #8B5CF644', borderRadius: '12px', padding: '18px 20px', display: 'flex', gap: '14px' }}>
+        <span style={{ fontSize: '24px', flexShrink: 0 }}>💡</span>
+        <div>
+          <div style={{ color: '#8B5CF6', fontWeight: '700', fontSize: '13px', marginBottom: '6px' }}>What gets searched at query time?</div>
+          <p style={{ color: '#94A3B8', fontSize: '13px', lineHeight: '1.7', margin: 0 }}>
+            If a PDF becomes 300 chunks, the vector store ends up with roughly <strong style={{ color: '#E2E8F0' }}>300 records</strong> and
+            <strong style={{ color: '#E2E8F0' }}> 300 vectors</strong>. At query time you search that chunk index, not the raw PDF file again.
+            ANN indexes such as HNSW make this fast even when the collection is much larger.
+          </p>
+        </div>
       </div>
 
       {/* Tabs */}

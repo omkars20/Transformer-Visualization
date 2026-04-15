@@ -7,16 +7,24 @@ import RagStep5_VectorStore from './steps/RagStep5_VectorStore.jsx';
 import RagStep6_Retrieval  from './steps/RagStep6_Retrieval.jsx';
 import RagStep7_Reranking  from './steps/RagStep7_Reranking.jsx';
 import RagStep8_Generation from './steps/RagStep8_Generation.jsx';
+import RagStep9_Evaluation          from './steps/RagStep9_Evaluation.jsx';
+import RagStep10_QueryTransformation from './steps/RagStep10_QueryTransformation.jsx';
+import RagStep11_PromptEngineering   from './steps/RagStep11_PromptEngineering.jsx';
+import RagStep12_ProductionRAG       from './steps/RagStep12_ProductionRAG.jsx';
 
 const RAG_STEPS = [
-  { id: 1, label: 'The Problem',   desc: 'Why RAG exists',       icon: '❓', color: '#F59E0B' },
-  { id: 2, label: 'Doc Ingestion', desc: 'Loading documents',     icon: '📄', color: '#10B981' },
-  { id: 3, label: 'Chunking',      desc: 'Splitting text',        icon: '✂️', color: '#06B6D4' },
-  { id: 4, label: 'Embeddings',    desc: 'Text → vectors',        icon: '🔢', color: '#6366F1' },
-  { id: 5, label: 'Vector Store',  desc: 'Storing vectors',       icon: '🗄️', color: '#8B5CF6' },
-  { id: 6, label: 'Retrieval',     desc: 'Finding chunks',        icon: '🔍', color: '#EC4899' },
-  { id: 7, label: 'Reranking',     desc: 'Improving results',     icon: '⬆️', color: '#EF4444' },
-  { id: 8, label: 'Generation',    desc: 'Answer creation',       icon: '✨', color: '#F97316' },
+  { id: 1,  label: 'The Problem',         desc: 'Why RAG exists',          icon: '❓', color: '#F59E0B' },
+  { id: 2,  label: 'Doc Ingestion',       desc: 'Loading documents',        icon: '📄', color: '#10B981' },
+  { id: 3,  label: 'Chunking',            desc: 'Splitting text',           icon: '✂️', color: '#06B6D4' },
+  { id: 4,  label: 'Embeddings',          desc: 'Text → vectors',           icon: '🔢', color: '#6366F1' },
+  { id: 5,  label: 'Vector Store',        desc: 'Storing vectors',          icon: '🗄️', color: '#8B5CF6' },
+  { id: 6,  label: 'Retrieval',           desc: 'Finding chunks',           icon: '🔍', color: '#EC4899' },
+  { id: 7,  label: 'Reranking',           desc: 'Improving results',        icon: '⬆️', color: '#EF4444' },
+  { id: 8,  label: 'Generation',          desc: 'Answer creation',          icon: '✨', color: '#F97316' },
+  { id: 9,  label: 'Evaluation',          desc: 'Measuring quality',        icon: '📏', color: '#22C55E' },
+  { id: 10, label: 'Query Transform',     desc: 'Better search queries',    icon: '🔄', color: '#A78BFA' },
+  { id: 11, label: 'Prompt Engineering',  desc: 'RAG-specific prompts',     icon: '📝', color: '#FB923C' },
+  { id: 12, label: 'Production RAG',      desc: 'System design & advanced', icon: '🏗️', color: '#38BDF8' },
 ];
 
 const STEP_COMPONENTS = [
@@ -28,6 +36,10 @@ const STEP_COMPONENTS = [
   RagStep6_Retrieval,
   RagStep7_Reranking,
   RagStep8_Generation,
+  RagStep9_Evaluation,
+  RagStep10_QueryTransformation,
+  RagStep11_PromptEngineering,
+  RagStep12_ProductionRAG,
 ];
 
 export default function RagViz() {

@@ -19,6 +19,27 @@ const RERANKER_MODELS = [
   { name: 'GPT-4 (LLM-as-reranker)',              provider: 'OpenAI',      speed: '🐢',   quality: '⭐⭐⭐⭐⭐', note: 'Use LLM to score relevance. Slow but powerful.' },
 ];
 
+const RERANK_FLOW = [
+  {
+    stage: 'Retriever',
+    color: '#6366F1',
+    detail: 'Searches the whole chunk index and brings back a broad candidate set.',
+    output: 'Top 10 candidates',
+  },
+  {
+    stage: 'Reranker',
+    color: '#EF4444',
+    detail: 'Looks only at those 10 candidates, scores query + chunk together, and reorders them.',
+    output: 'Top 3 winners',
+  },
+  {
+    stage: 'LLM',
+    color: '#F59E0B',
+    detail: 'Receives the cleaner final context and generates the answer.',
+    output: 'Final answer',
+  },
+];
+
 function getRerankedResults() {
   return [...INITIAL_RESULTS].sort((a, b) => b.crossScore - a.crossScore);
 }
@@ -46,7 +67,52 @@ export default function RagStep7_Reranking() {
           A <strong style={{ color: '#EF4444' }}>cross-encoder reranker</strong> takes the query + each chunk together,
           reads both simultaneously, and outputs a precise relevance score. It's <strong style={{ color: '#E2E8F0' }}>10-20× slower</strong>
           but dramatically more accurate. The standard pattern: <em style={{ color: '#EF4444' }}>retrieve 20, rerank to top 3.</em>
+          A reranker cannot rescue a chunk that the retriever never fetched in the first place.
         </p>
+      </div>
+
+      {/* Better understanding */}
+      <div style={{ background: '#0E1220', border: '1px solid #EF444444', borderRadius: '12px', padding: '20px' }}>
+        <div style={{ color: '#EF4444', fontWeight: '700', fontSize: '14px', marginBottom: '10px' }}>
+          Common confusion — does reranking also "retrieve top chunks"?
+        </div>
+        <p style={{ color: '#94A3B8', fontSize: '13px', lineHeight: '1.8', margin: '0 0 14px' }}>
+          Yes, but only from the retriever's candidate list. The retriever finds candidates from the whole database.
+          The reranker does a second, smarter pass on those candidates only. It <strong style={{ color: '#E2E8F0' }}>reorders and filters</strong>;
+          it does not search the entire database again.
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: '0', overflowX: 'auto', marginBottom: '14px' }}>
+          {RERANK_FLOW.map((item, i) => (
+            <React.Fragment key={item.stage}>
+              <div style={{
+                flex: 1, minWidth: '180px', background: '#131728',
+                border: `1px solid ${item.color}44`, borderRadius: '10px',
+                padding: '14px 12px',
+              }}>
+                <div style={{ color: item.color, fontWeight: '700', fontSize: '12px', marginBottom: '8px', fontFamily: 'Space Mono, monospace' }}>
+                  {item.stage}
+                </div>
+                <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.7', marginBottom: '10px' }}>{item.detail}</div>
+                <div style={{
+                  display: 'inline-flex', padding: '4px 10px', borderRadius: '20px',
+                  background: `${item.color}22`, border: `1px solid ${item.color}44`,
+                  color: item.color, fontSize: '11px', fontFamily: 'Space Mono, monospace',
+                }}>{item.output}</div>
+              </div>
+              {i < RERANK_FLOW.length - 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0 8px', color: '#2E3A55', fontSize: '20px', flexShrink: 0 }}>→</div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <div style={{
+          background: '#0A1628', border: '1px solid #EF444433', borderRadius: '8px',
+          padding: '12px 14px', color: '#EF4444', fontSize: '12px', fontWeight: '700',
+        }}>
+          Retriever finds candidates. Reranker finds winners.
+        </div>
       </div>
 
       {/* Bi-encoder vs Cross-encoder */}

@@ -38,6 +38,32 @@ const SAMPLE_META = {
   doc_type: 'policy',
 };
 
+const PREP_FLOW = [
+  { icon: '📕', label: 'PDF', desc: '100 raw pages' },
+  { icon: '📝', label: 'Extract Text', desc: 'OCR if scanned' },
+  { icon: '✂️', label: 'Chunk', desc: 'Many small pieces' },
+  { icon: '🏷️', label: 'Add Metadata', desc: 'source, page, section' },
+  { icon: '🔢', label: 'Embed', desc: '1 vector per chunk' },
+];
+
+const PREP_FAQS = [
+  {
+    q: 'Do we convert the PDF file directly into a vector?',
+    a: 'No. First extract text from the PDF, then split that text into chunks, then create an embedding for each chunk.',
+    color: '#EF4444',
+  },
+  {
+    q: 'When do we add metadata?',
+    a: 'Usually during loading or chunking, while the system still knows the source file, page number, section, author, and similar fields.',
+    color: '#8B5CF6',
+  },
+  {
+    q: 'Do we embed metadata too?',
+    a: 'Usually no. The main embedding is for chunk text. Metadata is stored separately for filtering, citations, and debugging.',
+    color: '#10B981',
+  },
+];
+
 export default function RagStep2_Loading() {
   const [activeDoc, setActiveDoc] = useState(0);
   const [showMeta, setShowMeta] = useState(false);
@@ -57,6 +83,47 @@ export default function RagStep2_Loading() {
           This means reading files, extracting their text content, and attaching metadata like file name, page number, or creation date.
           Metadata is crucial — it lets you later say <em style={{ color: '#10B981' }}>"This answer comes from HR_Manual.pdf, page 4"</em>.
         </p>
+      </div>
+
+      {/* Better understanding */}
+      <div>
+        <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', letterSpacing: '2px', color: '#64748B', textTransform: 'uppercase', marginBottom: '14px' }}>
+          Better understanding — PDF to RAG-ready data
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: '0', overflowX: 'auto', marginBottom: '14px' }}>
+          {PREP_FLOW.map((step, i) => (
+            <React.Fragment key={step.label}>
+              <div style={{
+                flex: 1, minWidth: '130px', background: '#0E1220',
+                border: '1px solid #1E2A45', borderRadius: '10px',
+                padding: '14px 12px', textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '22px', marginBottom: '6px' }}>{step.icon}</div>
+                <div style={{ color: '#E2E8F0', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>{step.label}</div>
+                <div style={{ color: '#64748B', fontSize: '11px', lineHeight: '1.4' }}>{step.desc}</div>
+              </div>
+              {i < PREP_FLOW.length - 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0 6px', color: '#2E3A55', fontSize: '20px', flexShrink: 0 }}>→</div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          {PREP_FAQS.map((item) => (
+            <div key={item.q} style={{
+              background: '#0E1220',
+              border: `1px solid ${item.color}33`,
+              borderLeft: `3px solid ${item.color}`,
+              borderRadius: '10px',
+              padding: '14px 16px',
+            }}>
+              <div style={{ color: item.color, fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>{item.q}</div>
+              <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.7' }}>{item.a}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Document Types */}

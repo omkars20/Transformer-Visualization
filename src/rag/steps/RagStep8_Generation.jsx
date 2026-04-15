@@ -73,6 +73,7 @@ const PIPELINE_RECAP = [
   { icon: '🔍', label: 'Retrieve',     color: '#EC4899', phase: 'online' },
   { icon: '⬆️', label: 'Rerank',       color: '#EF4444', phase: 'online' },
   { icon: '✨', label: 'Generate',     color: '#F97316', phase: 'online' },
+  { icon: '📏', label: 'Evaluate',     color: '#22C55E', phase: 'quality' },
 ];
 
 export default function RagStep8_Generation() {
@@ -252,7 +253,7 @@ export default function RagStep8_Generation() {
       {/* Full Pipeline Recap */}
       <div style={{ background: 'linear-gradient(135deg, #0E1220, #131728)', border: '1px solid #1E2A45', borderRadius: '16px', padding: '24px' }}>
         <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', letterSpacing: '2px', color: '#64748B', textTransform: 'uppercase', marginBottom: '16px' }}>
-          🎉 Complete RAG Pipeline — You've learned it all!
+          RAG lifecycle recap
         </div>
         <div style={{ display: 'flex', alignItems: 'stretch', gap: '0', overflowX: 'auto', marginBottom: '14px' }}>
           {PIPELINE_RECAP.map((item, i) => (
@@ -267,8 +268,14 @@ export default function RagStep8_Generation() {
                 <span style={{ fontSize: '10px', color: item.color, fontFamily: 'Space Mono, monospace', fontWeight: '600', textAlign: 'center' }}>{item.label}</span>
                 <span style={{
                   fontSize: '9px', padding: '1px 6px', borderRadius: '4px',
-                  background: item.phase === 'offline' ? '#1E2A45' : '#F9731611',
-                  color: item.phase === 'offline' ? '#475569' : '#F97316',
+                  background:
+                    item.phase === 'offline' ? '#1E2A45'
+                      : item.phase === 'quality' ? '#22C55E11'
+                        : '#F9731611',
+                  color:
+                    item.phase === 'offline' ? '#475569'
+                      : item.phase === 'quality' ? '#22C55E'
+                        : '#F97316',
                   fontFamily: 'Space Mono, monospace',
                 }}>{item.phase}</span>
               </div>
@@ -278,7 +285,7 @@ export default function RagStep8_Generation() {
             </React.Fragment>
           ))}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
           <div style={{ background: '#131728', border: '1px solid #1E2A45', borderRadius: '8px', padding: '12px 14px' }}>
             <div style={{ color: '#64748B', fontFamily: 'Space Mono, monospace', fontSize: '10px', marginBottom: '6px' }}>OFFLINE (Build once)</div>
             <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.6' }}>Load → Chunk → Embed → Store. Run when documents change. Can take minutes to hours for large corpora.</div>
@@ -286,6 +293,10 @@ export default function RagStep8_Generation() {
           <div style={{ background: '#131728', border: '1px solid #F9731622', borderRadius: '8px', padding: '12px 14px' }}>
             <div style={{ color: '#F97316', fontFamily: 'Space Mono, monospace', fontSize: '10px', marginBottom: '6px' }}>ONLINE (Per query, &lt;2s)</div>
             <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.6' }}>Embed query → Retrieve → Rerank → Generate. Happens for every user question in real-time.</div>
+          </div>
+          <div style={{ background: '#131728', border: '1px solid #22C55E22', borderRadius: '8px', padding: '12px 14px' }}>
+            <div style={{ color: '#22C55E', fontFamily: 'Space Mono, monospace', fontSize: '10px', marginBottom: '6px' }}>QUALITY LOOP (Batch / CI)</div>
+            <div style={{ color: '#94A3B8', fontSize: '12px', lineHeight: '1.6' }}>Evaluate retrieval and generation on a gold dataset so you know what to improve next.</div>
           </div>
         </div>
       </div>
