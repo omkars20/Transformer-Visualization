@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
+import RagViz from './rag/RagViz.jsx';
 import StepNav from './components/StepNav.jsx';
 import { runForwardPass } from './utils/llmEngine.js';
 import Step1_Tokenization  from './steps/Step1_Tokenization.jsx';
@@ -23,7 +24,13 @@ const STEP_META = [
   { id: 8, title: 'Output & Prediction',     input: 'X₃',                output: 'next token',       color: '#F97316' },
 ];
 
+const VIZ_MODES = [
+  { id: 'transformer', label: 'Transformer', icon: '⚡', color: '#6366F1' },
+  { id: 'rag',         label: 'RAG',         icon: '🔍', color: '#10B981' },
+];
+
 export default function App() {
+  const [vizMode, setVizMode]   = useState('transformer');
   const [step, setStep]         = useState(1);
   const [inputText, setInputText] = useState('I love AI');
   const [committed, setCommitted] = useState('I love AI');
@@ -63,12 +70,68 @@ export default function App() {
   ][step - 1];
 
   return (
+    <div style={{ display: 'flex', height: '100vh', background: '#0B0D17', overflow: 'hidden' }}>
+
+      {/* ── Viz-mode rail (far left) ──────────────────────────── */}
+      <div
+        style={{
+          width: '72px',
+          flexShrink: 0,
+          background: '#080A12',
+          borderRight: '1px solid #1E2A45',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          paddingTop: '16px',
+          gap: '8px',
+        }}
+      >
+        {VIZ_MODES.map((m) => {
+          const active = vizMode === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => setVizMode(m.id)}
+              title={m.label}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '5px',
+                width: '56px',
+                padding: '10px 4px',
+                background: active ? `${m.color}22` : 'transparent',
+                border: 'none',
+                borderRadius: '10px',
+                borderLeft: active ? `3px solid ${m.color}` : '3px solid transparent',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>{m.icon}</span>
+              <span
+                style={{
+                  fontSize: '9px',
+                  fontFamily: 'Space Mono, monospace',
+                  color: active ? m.color : '#64748B',
+                  fontWeight: active ? '700' : '400',
+                  lineHeight: '1.2',
+                  textAlign: 'center',
+                }}
+              >
+                {m.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Rest of the app ──────────────────────────────────── */}
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
-        background: '#0B0D17',
+        flex: 1,
         overflow: 'hidden',
       }}
     >
@@ -114,107 +177,86 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ width: '1px', height: '32px', background: '#1E2A45' }} />
+        {vizMode === 'transformer' && (
+          <>
+            <div style={{ width: '1px', height: '32px', background: '#1E2A45' }} />
 
-        {/* Input */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, maxWidth: '500px' }}>
-          <div
-            style={{
-              fontSize: '10px',
-              color: '#64748B',
-              fontFamily: 'Space Mono, monospace',
-              flexShrink: 0,
-            }}
-          >
-            Input:
+            {/* Input */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, maxWidth: '500px' }}>
+              <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'Space Mono, monospace', flexShrink: 0 }}>
+                Input:
+              </div>
+              <input
+                ref={inputRef}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type words from vocab: I love AI learning model…"
+                style={{
+                  flex: 1, background: '#131728', border: '1px solid #1E2A45',
+                  borderRadius: '8px', padding: '7px 12px',
+                  fontFamily: 'Space Mono, monospace', fontSize: '12px',
+                  color: '#E2E8F0', outline: 'none', transition: 'border-color 0.15s ease',
+                }}
+                onFocus={(e) => (e.target.style.borderColor = '#6366F1')}
+                onBlur={(e) => (e.target.style.borderColor = '#1E2A45')}
+              />
+              <button
+                onClick={handleRun}
+                style={{
+                  padding: '7px 16px', background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
+                  border: 'none', borderRadius: '8px', color: '#fff',
+                  fontFamily: 'Space Mono, monospace', fontSize: '11px', fontWeight: '700',
+                  cursor: 'pointer', flexShrink: 0, transition: 'opacity 0.15s ease',
+                }}
+                onMouseEnter={(e) => (e.target.style.opacity = '0.85')}
+                onMouseLeave={(e) => (e.target.style.opacity = '1')}
+              >Run ↵</button>
+            </div>
+
+            <div style={{ flex: 1 }} />
+
+            {/* Step flow indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              {STEP_META.map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => setStep(s.id)}
+                  title={s.title}
+                  style={{
+                    width: '24px', height: '6px', borderRadius: '3px',
+                    background: s.id === step ? s.color : s.id < step ? `${s.color}66` : '#1E2A45',
+                    cursor: 'pointer', transition: 'all 0.15s ease',
+                  }}
+                />
+              ))}
+              <div style={{ marginLeft: '8px', fontFamily: 'Space Mono, monospace', fontSize: '10px', color: '#64748B' }}>
+                {step}/{TOTAL_STEPS}
+              </div>
+            </div>
+          </>
+        )}
+
+        {vizMode === 'rag' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px' }}>
+            <div style={{ width: '1px', height: '32px', background: '#1E2A45' }} />
+            <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'Space Mono, monospace' }}>
+              Retrieval-Augmented Generation
+            </div>
           </div>
-          <input
-            ref={inputRef}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type words from vocab: I love AI learning model…"
-            style={{
-              flex: 1,
-              background: '#131728',
-              border: '1px solid #1E2A45',
-              borderRadius: '8px',
-              padding: '7px 12px',
-              fontFamily: 'Space Mono, monospace',
-              fontSize: '12px',
-              color: '#E2E8F0',
-              outline: 'none',
-              transition: 'border-color 0.15s ease',
-            }}
-            onFocus={(e) => (e.target.style.borderColor = '#6366F1')}
-            onBlur={(e) => (e.target.style.borderColor = '#1E2A45')}
-          />
-          <button
-            onClick={handleRun}
-            style={{
-              padding: '7px 16px',
-              background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
-              border: 'none',
-              borderRadius: '8px',
-              color: '#fff',
-              fontFamily: 'Space Mono, monospace',
-              fontSize: '11px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              flexShrink: 0,
-              transition: 'opacity 0.15s ease',
-            }}
-            onMouseEnter={(e) => (e.target.style.opacity = '0.85')}
-            onMouseLeave={(e) => (e.target.style.opacity = '1')}
-          >
-            Run ↵
-          </button>
-        </div>
-
-        <div style={{ flex: 1 }} />
-
-        {/* Step flow indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {STEP_META.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => setStep(s.id)}
-              title={s.title}
-              style={{
-                width: '24px',
-                height: '6px',
-                borderRadius: '3px',
-                background:
-                  s.id === step
-                    ? s.color
-                    : s.id < step
-                    ? `${s.color}66`
-                    : '#1E2A45',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            />
-          ))}
-          <div
-            style={{
-              marginLeft: '8px',
-              fontFamily: 'Space Mono, monospace',
-              fontSize: '10px',
-              color: '#64748B',
-            }}
-          >
-            {step}/{TOTAL_STEPS}
-          </div>
-        </div>
+        )}
       </header>
 
       {/* ── Body ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Sidebar */}
-        <StepNav currentStep={step} onSelect={setStep} />
+        {/* Transformer mode */}
+        {vizMode === 'transformer' && <StepNav currentStep={step} onSelect={setStep} />}
 
-        {/* Main content */}
-        <main
+        {/* RAG mode */}
+        {vizMode === 'rag' && <RagViz />}
+
+        {/* Transformer main content */}
+        {vizMode === 'transformer' && <main
           style={{
             flex: 1,
             overflowY: 'auto',
@@ -371,8 +413,9 @@ export default function App() {
               </button>
             </div>
           )}
-        </main>
+        </main>}
       </div>
+    </div>
     </div>
   );
 }

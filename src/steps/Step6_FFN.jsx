@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
-  MatrixViz, ShapeTag, InsightBox, Formula, SectionLabel, FlowArrow,
+  MatrixViz, ShapeTag, InsightBox, Formula, SectionLabel,
 } from '../components/MatrixViz.jsx';
 import { CFG } from '../utils/llmEngine.js';
 
@@ -98,6 +98,7 @@ function TokenValueBar({ values, color, label }) {
 // ─── Main component ────────────────────────────────────────────────────────
 export default function Step6_FFN({ result }) {
   const [selectedTok, setSelectedTok] = useState(0);
+  const [selectedHidden, setSelectedHidden] = useState(0);
 
   if (!result) return null;
   const { tokens, X2, ffn } = result;
@@ -128,6 +129,18 @@ export default function Step6_FFN({ result }) {
   const tokFired   = tokRelu.filter((x) => x > 0).length;
   const tokFirePct = Math.round((tokFired / tokRelu.length) * 100);
 
+  const w1Column = ffn.W1.map((row) => row[selectedHidden]);
+  const w1Terms = tokInput.map((x, inputDim) => ({
+    inputDim,
+    x,
+    w: w1Column[inputDim],
+    prod: x * w1Column[inputDim],
+  }));
+  const w1DotSum = w1Terms.reduce((sum, term) => sum + term.prod, 0);
+  const w1Bias = ffn.b1[selectedHidden];
+  const w1PreValue = tokPre[selectedHidden];
+  const w1ReluValue = tokRelu[selectedHidden];
+
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
@@ -153,6 +166,8 @@ export default function Step6_FFN({ result }) {
         </div>
         <p style={{ color: '#64748B', fontSize: '13px', margin: 0 }}>
           After the group discussion (attention), every word gets alone-time to process what it learned.
+          The input here is <strong style={{ color: '#C4B5FD' }}>X2</strong>:
+          the attention-enriched matrix you already saw around Step 5.
         </p>
       </div>
 
@@ -277,15 +292,14 @@ export default function Step6_FFN({ result }) {
         </div>
       </div>
 
-      {/* ── 4. TOKEN SELECTOR ────────────────────────────────────────────── */}
+      {/* ── 4. GLOBAL TOKEN PICKER ──────────────────────────────────────── */}
       <div className="viz-card">
-        <SectionLabel>Trace a Word's Private Journey</SectionLabel>
+        <SectionLabel>Choose a Word to Study</SectionLabel>
         <div style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '12px' }}>
-          Pick any word below to watch it travel through all three FFN steps:
+          Everything below updates for the selected word.
         </div>
 
-        {/* Token picker buttons */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {tokenNames.map((name, i) => {
             const color = TOKEN_COLORS[i % TOKEN_COLORS.length];
             const active = i === selectedTok;
@@ -310,6 +324,200 @@ export default function Step6_FFN({ result }) {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* ── 5. SIMPLE MATH EXPLAINER ─────────────────────────────────────── */}
+      <div className="viz-card">
+        <SectionLabel>Where Do These Numbers Come From?</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          <Callout color="#06B6D4" icon="📥" title="X2 = the starting row">
+            Step 5 showed how attention heads read from the same matrix <strong style={{ color: '#67E8F9' }}>X2</strong>.
+            Step 6 starts from that same matrix too.
+            <br /><br />
+            For the selected token <strong style={{ color: tokColor }}>"{tokenNames[selectedTok]}"</strong>,
+            the FFN input is just one row: <strong style={{ color: '#67E8F9' }}>X2[{selectedTok}]</strong>.
+            No token mixing happens inside the FFN.
+          </Callout>
+
+          <Callout color="#EC4899" icon="🧮" title="W1 = learned weight matrix">
+            <strong style={{ color: '#F9A8D4' }}>W1</strong> has shape
+            {' '}<strong style={{ color: '#F9A8D4' }}>({CFG.EMBED_DIM}×{CFG.FFN_DIM})</strong>.
+            <br /><br />
+            Each <strong style={{ color: '#F9A8D4' }}>column of W1</strong> creates one hidden number.
+            So one token row ({CFG.EMBED_DIM} values) multiplied by one W1 column ({CFG.EMBED_DIM} values)
+            gives one output activation like <strong style={{ color: '#F9A8D4' }}>h3</strong> or <strong style={{ color: '#F9A8D4' }}>h11</strong>.
+          </Callout>
+
+          <Callout color="#8B5CF6" icon="➕" title="b1 = learned bias vector">
+            <strong style={{ color: '#C4B5FD' }}>b1</strong> has shape
+            {' '}<strong style={{ color: '#C4B5FD' }}>({CFG.FFN_DIM},)</strong>:
+            one bias per hidden neuron.
+            <br /><br />
+            After the dot product is computed, we add that neuron's bias.
+            In code, <strong style={{ color: '#C4B5FD' }}>b1[i]</strong> means
+            "take the bias for hidden dimension <strong>i</strong>".
+          </Callout>
+        </div>
+
+        <div style={{
+          marginTop: '14px',
+          background: '#0B0D17',
+          border: '1px solid #1E2A45',
+          borderRadius: '10px',
+          padding: '14px 16px',
+        }}>
+          <div style={{ fontSize: '12px', color: '#E2E8F0', fontWeight: '700', marginBottom: '8px' }}>
+            One hidden number is computed like this
+          </div>
+          <div style={{
+            fontFamily: 'Space Mono, monospace',
+            fontSize: '12px',
+            color: '#67E8F9',
+            lineHeight: '1.9',
+            marginBottom: '8px',
+          }}>
+            h1_pre[token][i] = Σ over j of X2[token][j] × W1[j][i] + b1[i]
+          </div>
+          <div style={{ fontSize: '12px', color: '#94A3B8', lineHeight: '1.8' }}>
+            If you see <strong style={{ color: '#E2E8F0' }}>i</strong> in the code, it is just an index,
+            not the word "I". Here:
+            <br />
+            <strong style={{ color: '#06B6D4' }}>j</strong> = which input feature we are reading ({colLabels8.join(', ')})
+            <br />
+            <strong style={{ color: '#EC4899' }}>i</strong> = which hidden neuron we are building ({colLabels16[0]} ... {colLabels16[colLabels16.length - 1]})
+          </div>
+        </div>
+      </div>
+
+      {/* ── 6. ONE MULTIPLY DRILL-DOWN ─────────────────────────────────── */}
+      <div className="viz-card">
+        <SectionLabel>One Multiply, Slowly</SectionLabel>
+        <div style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '14px', lineHeight: '1.7' }}>
+          Pick one hidden neuron below. We will compute just one value:
+          {' '}<strong style={{ color: '#EC4899' }}>h1_pre["{tokenNames[selectedTok]}"][h{selectedHidden}]</strong>.
+          This is all matrix multiplication is here: one token row dot one W1 column, then add the bias.
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+          {colLabels16.map((label, i) => {
+            const active = i === selectedHidden;
+            return (
+              <button
+                key={label}
+                onClick={() => setSelectedHidden(i)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #EC4899',
+                  background: active ? '#EC4899' : '#EC489922',
+                  color: active ? '#0B0D17' : '#EC4899',
+                  fontFamily: 'Space Mono, monospace',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+          <div>
+            <div style={{ fontSize: '11px', color: '#06B6D4', fontFamily: 'Space Mono, monospace', marginBottom: '6px' }}>
+              Input row: X2["{tokenNames[selectedTok]}"] = 1×{CFG.EMBED_DIM}
+            </div>
+            <MatrixViz matrix={[tokInput]} colLabels={colLabels8} size="sm" />
+          </div>
+
+          <div>
+            <div style={{ fontSize: '11px', color: '#EC4899', fontFamily: 'Space Mono, monospace', marginBottom: '6px' }}>
+              W1 column for {colLabels16[selectedHidden]} = {CFG.EMBED_DIM}×1
+            </div>
+            <MatrixViz matrix={[w1Column]} colLabels={colLabels8} size="sm" />
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          background: '#0B0D17',
+          border: '1px solid #1E2A45',
+          borderRadius: '10px',
+          padding: '16px',
+        }}>
+          <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'Space Mono, monospace', marginBottom: '10px' }}>
+            Multiply matching positions, then add them up:
+          </div>
+          <div style={{ display: 'grid', gap: '6px' }}>
+            {w1Terms.map((term) => (
+              <div
+                key={term.inputDim}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '72px 1fr 1fr 1fr',
+                  gap: '8px',
+                  alignItems: 'center',
+                  fontFamily: 'Space Mono, monospace',
+                  fontSize: '11px',
+                }}
+              >
+                <span style={{ color: '#64748B' }}>d{term.inputDim}</span>
+                <span style={{ color: '#06B6D4' }}>{term.x.toFixed(3)}</span>
+                <span style={{ color: '#EC4899' }}>{term.w.toFixed(3)}</span>
+                <span style={{ color: '#10B981' }}>{term.prod.toFixed(4)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{
+            marginTop: '12px',
+            paddingTop: '12px',
+            borderTop: '1px solid #1E2A45',
+            display: 'grid',
+            gap: '6px',
+            fontFamily: 'Space Mono, monospace',
+            fontSize: '12px',
+          }}>
+            <div style={{ color: '#94A3B8' }}>
+              dot product sum ≈ <strong style={{ color: '#10B981' }}>{w1DotSum.toFixed(4)}</strong>
+            </div>
+            <div style={{ color: '#94A3B8' }}>
+              + b1[{selectedHidden}] = <strong style={{ color: '#8B5CF6' }}>{w1Bias.toFixed(3)}</strong>
+            </div>
+            <div style={{ color: '#94A3B8' }}>
+              h1_pre["{tokenNames[selectedTok]}"][{colLabels16[selectedHidden]}] = <strong style={{ color: '#EC4899', fontSize: '14px' }}>{w1PreValue.toFixed(3)}</strong>
+            </div>
+            <div style={{ color: '#94A3B8' }}>
+              after ReLU = <strong style={{ color: '#F59E0B', fontSize: '14px' }}>{w1ReluValue.toFixed(3)}</strong>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748B', lineHeight: '1.7' }}>
+            The displayed products use rounded values, so the sum may differ slightly by a few thousandths.
+            The main idea stays the same: <strong style={{ color: '#E2E8F0' }}>row × column + bias</strong>.
+            Repeat this for all {CFG.FFN_DIM} columns of W1 to build the full expanded vector.
+          </div>
+        </div>
+
+        <Callout color="#10B981" icon="↩" title="W2 works the same way, just in reverse">
+          After ReLU, the second layer does another dot product:
+          <br /><br />
+          <strong style={{ color: '#6EE7B7' }}>
+            output[token][k] = Σ over i of h1_relu[token][i] × W2[i][k] + b2[k]
+          </strong>
+          <br /><br />
+          The only difference is the shape flips from <strong>{CFG.FFN_DIM} → {CFG.EMBED_DIM}</strong>,
+          so the big hidden vector gets compressed back to the normal embedding size.
+        </Callout>
+      </div>
+
+      {/* ── 7. TOKEN JOURNEY ─────────────────────────────────────────────── */}
+      <div className="viz-card">
+        <SectionLabel>Trace a Word's Private Journey</SectionLabel>
+        <div style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '12px' }}>
+          The selected word travels through all three FFN steps here:
         </div>
 
         {/* Journey display for selected token */}
@@ -437,7 +645,7 @@ export default function Step6_FFN({ result }) {
         </div>
       </div>
 
-      {/* ── 5. SPARSITY BAR CHART (all tokens) ───────────────────────────── */}
+      {/* ── 8. SPARSITY BAR CHART (all tokens) ───────────────────────────── */}
       <div className="viz-card">
         <SectionLabel>ReLU Sparsity — How Many Neurons "Fired" Per Word?</SectionLabel>
         <Callout color="#F59E0B" icon="💡" title="What sparsity means">
@@ -522,7 +730,7 @@ export default function Step6_FFN({ result }) {
         </div>
       </div>
 
-      {/* ── 6. FULL MATRIX VIEWS ──────────────────────────────────────────── */}
+      {/* ── 9. FULL MATRIX VIEWS ──────────────────────────────────────────── */}
       <div className="viz-card">
         <SectionLabel>Layer 1: Expand ({CFG.EMBED_DIM} → {CFG.FFN_DIM}) — Full Matrix View</SectionLabel>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -598,8 +806,14 @@ export default function Step6_FFN({ result }) {
         </div>
       </div>
 
-      {/* ── 7. FORMULA + STATS ───────────────────────────────────────────── */}
+      {/* ── 10. FORMULA + STATS ──────────────────────────────────────────── */}
       <Formula>
+        For one token row x:{'\n'}
+        h1_pre[i] = Σj x[j] × W1[j][i] + b1[i]   ← i = hidden neuron, j = input feature{'\n'}
+        h1_relu[i] = max(0, h1_pre[i]){'\n'}
+        out[k] = Σi h1_relu[i] × W2[i][k] + b2[k]   ← k = output feature{'\n'}
+        {'\n'}
+        Matrix version:{'\n'}
         FFN(x) = max(0, x @ W1 + b1) @ W2 + b2{'\n'}
         W1: ({CFG.EMBED_DIM}, {CFG.FFN_DIM})  b1: ({CFG.FFN_DIM},)   ← expand {CFG.EMBED_DIM}→{CFG.FFN_DIM}{'\n'}
         W2: ({CFG.FFN_DIM}, {CFG.EMBED_DIM})  b2: ({CFG.EMBED_DIM},) ← shrink {CFG.FFN_DIM}→{CFG.EMBED_DIM}{'\n'}
